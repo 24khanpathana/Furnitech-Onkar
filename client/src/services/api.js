@@ -1,7 +1,37 @@
 import axios from 'axios';
 
+const DEFAULT_REMOTE_API_URL = 'https://furnitech-onkar.onrender.com/api';
+const DEFAULT_LOCAL_API_URL = '/api';
+
+const normalizeApiBaseUrl = (value) => {
+  const fallback = DEFAULT_LOCAL_API_URL;
+  if (!value) {
+    return fallback;
+  }
+
+  const trimmed = value.replace(/\/+$/, '');
+  return trimmed.endsWith('/api') ? trimmed : `${trimmed}/api`;
+};
+
+const resolveApiBaseUrl = () => {
+  const configured = process.env.REACT_APP_API_URL;
+  if (configured) {
+    return normalizeApiBaseUrl(configured);
+  }
+
+  if (typeof window !== 'undefined') {
+    const hostname = window.location.hostname;
+    if (hostname === 'localhost' || hostname === '127.0.0.1') {
+      return DEFAULT_LOCAL_API_URL;
+    }
+  }
+
+  return DEFAULT_REMOTE_API_URL;
+};
+
 const API = axios.create({
-  baseURL: process.env.REACT_APP_API_URL || 'http://localhost:5000/api',
+  baseURL: resolveApiBaseUrl(),
+  timeout: 20000,
 });
 
 API.interceptors.request.use((config) => {

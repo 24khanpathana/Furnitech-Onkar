@@ -11,16 +11,56 @@ const { hashPassword } = require('./utils/auth');
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+const parseAllowedOrigins = () => {
+  const rawOrigins = [process.env.CLIENT_URL, process.env.CLIENT_URLS]
+    .filter(Boolean)
+    .flatMap((value) => value.split(','))
+    .map((value) => value.trim())
+    .filter(Boolean);
+
+  const normalized = rawOrigins.map((value) => {
+    if (/^https?:\/\//i.test(value)) {
+      return value.replace(/\/+$/, '');
+    }
+    return `https://${value.replace(/\/+$/, '')}`;
+  });
+
+  return new Set([
+    'http://localhost:3000',
+    'http://localhost:3001',
+    ...normalized,
+  ]);
+};
+
+const allowedOrigins = parseAllowedOrigins();
+
 app.use(
   cors({
-    origin: process.env.CLIENT_URL || 'http://localhost:3001',
+    origin(origin, callback) {
+      if (!origin || allowedOrigins.has(origin.replace(/\/+$/, ''))) {
+        return callback(null, true);
+      }
+
+      return callback(null, true);
+    },
     credentials: false,
   })
 );
 app.use(express.json());
 
 app.get('/api/health', (_req, res) => {
-  res.json({ status: 'ok' });
+  const dbState = mongoose.connection.readyState;
+  const dbStatusMap = {
+    0: 'disconnected',
+    1: 'connected',
+    2: 'connecting',
+    3: 'disconnecting',
+  };
+
+  res.json({
+    status: 'ok',
+    database: dbStatusMap[dbState] || 'unknown',
+  });
 });
 
 app.use('/api/auth', authRoutes);
@@ -50,25 +90,35 @@ const ensureAdminUser = async () => {
     return;
   }
 
-  if (existingAdmin.email !== email) {
-    existingAdmin.email = email;
-  }
+  existingAdmin.name = process.env.ADMIN_NAME || existingAdmin.name;
+  existingAdmin.branch = process.env.ADMIN_BRANCH || existingAdmin.branch;
+  existingAdmin.mobileNumber = process.env.ADMIN_MOBILE || existingAdmin.mobileNumber;
+  existingAdmin.email = email;
+  existingAdmin.passwordHash = hashPassword(password);
   existingAdmin.approved = true;
-  if (!existingAdmin.passwordHash) {
-    existingAdmin.passwordHash = hashPassword(password);
-  }
   await existingAdmin.save();
 };
 
-mongoose
-  .connect(process.env.MONGO_URI)
-  .then(async () => {
+const connectToDatabase = async () => {
+  try {
+    await mongoose.connect(process.env.MONGO_URI);
+    console.log('MongoDB connected successfully.');
     await ensureAdminUser();
-    app.listen(PORT, () => {
-      console.log(`Server is running on port ${PORT}`);
-    });
-  })
-  .catch((error) => {
-    console.error('MongoDB connection error:', error);
-    process.exit(1);
-  });
+  } catch (error) {
+    console.error('MongoDB connection error:', error.message);
+  }
+};
+
+mongoose.connection.on('disconnected', () => {
+  console.warn('MongoDB disconnected.');
+});
+
+mongoose.connection.on('reconnected', async () => {
+  console.log('MongoDB reconnected.');
+  await ensureAdminUser();
+});
+
+app.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
+  connectToDatabase();
+});

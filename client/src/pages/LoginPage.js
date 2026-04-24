@@ -18,7 +18,18 @@ function LoginPage({ role }) {
       await login({ role, ...form });
       navigate(role === 'admin' ? '/admin/dashboard' : '/worker/dashboard');
     } catch (err) {
-      setError(err.response?.data?.message || 'Unable to login right now.');
+      const networkError =
+        !err.response &&
+        (err.code === 'ERR_NETWORK' ||
+          err.code === 'ECONNABORTED' ||
+          /network|timeout/i.test(err.message || ''));
+
+      setError(
+        err.response?.data?.message ||
+          (networkError
+            ? 'Backend is unreachable right now. Redeploy the backend and frontend, then try again in a minute.'
+            : 'Unable to login right now.')
+      );
     } finally {
       setLoading(false);
     }
